@@ -1,0 +1,19 @@
+repos/
+jwt.hex
+keys.json
+logs/
+keys/
+!keys/readme.txt
+
+data/
+
+tasks/
+# .env.local
+# .env.stage
+# .env.prod
+.env.backup
+.env
+
+.DS_Store
+.cursor
+letsencrypt/
