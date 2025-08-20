@@ -15,13 +15,13 @@ cp .env.backend.example .env
 
 Update `NODE_ID` in `.env` with your node name.
 
-1) Initialize repositories and images
+2) Initialize repositories and images
 ```bash
 chmod +x setup-repos.sh
 ./setup-repos.sh --dev
 ```
 
-1) Start Kaspa and wait for full sync
+3) Start Kaspa and wait for full sync
 ```bash
 docker compose --profile kaspad up -d
 ```
