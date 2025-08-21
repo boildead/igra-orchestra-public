@@ -53,7 +53,8 @@
     "petersburgBlock": 0,
     "shanghaiTime": 0,
     "terminalTotalDifficulty": 0,
-    "terminalTotalDifficultyPassed": true
+    "terminalTotalDifficultyPassed": true,
+    "pragueTime": 0
   },
   "baseFeePerGas": "0x1",
   "difficulty": "0x0",
