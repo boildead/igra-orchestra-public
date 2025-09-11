@@ -215,6 +215,9 @@ start_reth_node() {
         --engine.always-process-payload-attributes-on-canonical-head \
         --txpool.discard-reorged-transactions \
         --metrics 0.0.0.0:9001 \
+        --engine.persistence-threshold 200 \
+        --engine.memory-block-buffer-target 100 \
+        --engine.state-root-fallback \
         -vv
 }
 
