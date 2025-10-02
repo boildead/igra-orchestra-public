@@ -14,6 +14,7 @@ cp .env.backend.example .env
 ```
 
 Update `NODE_ID` in `.env` with your node name.
+Set `HEALTH_CHECK_API_KEY` (you can get it in Igra Discord server)
 
 2) Initialize repositories and images
 ```bash
