@@ -1,16 +1,29 @@
 # RPC Setup & Entry Transactions Guide
 
 ## Prerequisites
-- Kaspad and backend services already running
-- Docker & Docker Compose installed
+- [Backend Node and Kaspad setup completed and running](./quick-setup-prebuilt.md)
+- Domain name purchased with A record pointing to IP of server with Backend Node (optional but recommended)
 
 ## Initial Setup
 
 ### Configure Environment
+Copy RPC related config from .env.backend-rpc.example:
+
 ```bash
-cp .env.backend-with-rpc.example .env
-# Edit .env to set your configuration
+sed -n '/BEGIN RPC CONFIG/,/END RPC CONFIG/p' .env.backend-rpc.example | grep -v "BEGIN RPC CONFIG" | grep -v "END RPC CONFIG" >> .env
 ```
+
+**OR** copy manually:
+
+1. Open .env.backend-rpc.example
+
+2. Copy everything between (and excluding) these lines:
+```bash
+# --- BEGIN RPC CONFIG ---
+
+# --- END RPC CONFIG ---
+```
+3. Paste at the end of your existing .env file
 
 ## Wallet Setup
 
@@ -33,7 +46,7 @@ docker run --rm -v $(pwd)/keys:/keys --network igra-orchestra-testnet_igra-netwo
 ```
 
 Expected output:
-```
+```bash
 2025-08-20T15:57:15 [INFO] Connected to kaspa node successfully
 2025-08-20T15:57:15 [INFO] Starting wallet server on 0.0.0.0:8082
 2025-08-20T15:57:17 [INFO] Finished initial sync
@@ -46,26 +59,53 @@ docker run --rm --network host --entrypoint /app/test_client \
 ```
 
 Output:
-```
+```bash
 New Address="kaspatest:qqfrt9vlrpl98m8gwsrw45ynvpgxcrl87x3h2337k8ft4eyhacyqumc0t9vng"
 Balance: Available=0, Pending=0
 ```
 
 Stop wallet daemon in Terminal 1 with Ctrl+C. Verify stopped: `docker ps`
 
-### 3. Configure .env
+### 3. Configure .env file
 ```bash
 W0_WALLET_TO_ADDRESS=kaspatest:[your-address-from-step-2]
-W0_KASWALLET_PASSWORD=[your-password-from-step-1]
+W0_KASWALLET_PASSWORD=[your-password-from-step-1] 
 ```
+Leave password empty if you skipped creation in [Step 1](#1-Generate-Wallet-Key)
+
+If using only 1 worker you can delete all other workers configuration (`W1_WALLET_TO_ADDRESS`, `W1_KASWALLET_PASSWORD`, etc.)
+
+If only reading blockchain data, set `RPC_READ_ONLY=true` in `.env` and skip [funding](#4-Fund-Your-Wallet-Optional).
 
 ### 4. Fund Your Wallet (Optional)
 **Only required if submitting transactions or entry transactions:**
 - Send KAS to the address from step 2
 - Required for: transaction fees, entry transaction deposits
-- If only reading blockchain data, set `RPC_READ_ONLY=true` in `.env` and skip funding
 
 ## RPC Provider Setup
+
+### RPC Access
+In `.env`, configure:
+- `RPC_ACCESS_TOKEN_1` to `RPC_ACCESS_TOKEN_46` - **Must all be set**, otherwise RPC works without authentication.
+
+You can use this script to generate tokens (Linux/Mac):
+```bash
+for i in {1..46}; do echo "RPC_ACCESS_TOKEN_$i=$(openssl rand -hex 16)"; done
+```
+- `RPC_READ_ONLY=true` - Set to `true` for read-only access (if you skipped [funding](#4-Fund-Your-Wallet-Optional), no wallet/funding needed), `false` to allow transactions
+
+### Configuration
+
+**For HTTPS (recommended, requires domain):**
+- `IGRA_ORCHESTRA_DOMAIN` - Your domain
+- `IGRA_ORCHESTRA_DOMAIN_EMAIL` - Your email for SSL certificates
+
+**Without HTTPS:** Comment out these lines in `docker-compose.yml` under traefik:
+```yaml
+# - "--certificatesresolvers.myresolver.acme.email=${IGRA_ORCHESTRA_DOMAIN_EMAIL}"
+# - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+# - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
+```
 
 ### Start Services
 ```bash
@@ -79,36 +119,18 @@ docker compose ps
 # Should show: rpc-provider-0, kaswallet-0 (plus more if multiple workers)
 ```
 
-## RPC Access
-
-### Configuration
-In `.env`, configure:
-- `RPC_ACCESS_TOKEN_1` to `RPC_ACCESS_TOKEN_46` - **Must all be set**, otherwise RPC works without authentication
-- `RPC_READ_ONLY=true` - Set to `true` for read-only access (no wallet/funding needed), `false` to allow transactions
-
-For HTTPS (requires domain):
-- `IGRA_ORCHESTRA_DOMAIN` - Your domain
-- `IGRA_ORCHESTRA_DOMAIN_EMAIL` - Your email for SSL certificates
-
-**Without HTTPS:** Comment out these lines in `docker-compose.yml` under traefik:
-```yaml
-# - "--certificatesresolvers.myresolver.acme.email=${IGRA_ORCHESTRA_DOMAIN_EMAIL}"
-# - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-# - "--certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web"
-```
-
 ### Endpoint Format
-```
+```bash
 # With HTTPS:
-https://{DOMAIN}/{ACCESS_TOKEN}
+https://{IGRA_ORCHESTRA_DOMAIN}:8545/{RPC_ACCESS_TOKEN_1}
 
 # Without HTTPS:
-http://{HOST_IP}:8545/{ACCESS_TOKEN}
+http://{HOST_IP}:8545/{RPC_ACCESS_TOKEN_1}
 ```
 
 ### Test RPC
 ```bash
-curl -X POST https://your-domain.com/{your_access_token} \
+curl -X POST https://your-domain.com:8545/{RPC_ACCESS_TOKEN_1} \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
 ```
@@ -148,8 +170,8 @@ docker run --rm \
 - `--l2-address`: Ethereum L2 address for iKAS deposit where you want to receive the funds.
 
 ### Success Output
-```
- Entry transaction sent successfully!
+```bash
+   Entry transaction sent successfully!
    Transaction ID: 97b1a2b3c4d5...
    Recipient: kaspa:qpam...
    Amount: 1.50000000 KAS (150000000 SOMPI)
