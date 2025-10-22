@@ -19,10 +19,13 @@ FROM rust:slim
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y libssl-dev openssl && \
+    apt-get install -y libssl-dev openssl curl && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/kaspad /app/
+COPY kaspad-healthcheck.sh /app/
+
+RUN chmod +x /app/kaspad-healthcheck.sh
 
 # RUN openssl rand -hex 32 > jwt.hex
 

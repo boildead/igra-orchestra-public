@@ -25,11 +25,14 @@ FROM rust:slim
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y libssl-dev openssl && \
+    apt-get install -y libssl-dev openssl curl tar bash && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/viaduct /app/
+COPY viaduct-entrypoint.sh /app/
+COPY ../../scripts/backup/download-from-s3.sh /app/scripts/
 
-RUN openssl rand -hex 32 > jwt.hex
+RUN chmod +x /app/viaduct-entrypoint.sh /app/scripts/download-from-s3.sh && \
+    openssl rand -hex 32 > jwt.hex
 
-ENTRYPOINT ["/app/viaduct"]
+ENTRYPOINT ["/app/viaduct-entrypoint.sh"]

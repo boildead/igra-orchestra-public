@@ -1,4 +1,4 @@
-name: igra-orchestra-${NETWORK}
+name: igra-orchestra-${NETWORK}-full
 
 volumes:
   kaspad_data:
@@ -16,6 +16,7 @@ volumes:
   kaswallet_3_keys:
   kaswallet_4_keys:
   shared_config:
+
 networks:
   igra-network:
   traefik-network:
@@ -143,6 +144,68 @@ x-kaswallet-base: &kaswallet-base
     --listen 0.0.0.0:8082
 
 services:
+  # SYNC ORCHESTRATOR SERVICE
+  sync-orchestrator:
+    <<: *default-service
+    image: alpine:latest
+    container_name: sync-orchestrator
+    command: >
+      sh -c '
+      echo "=== IGRA ORCHESTRA SYNC ORCHESTRATOR ===" &&
+      echo "Starting sync orchestration..." &&
+      echo "This service will automatically start backend services after kaspad sync completes." &&
+      echo "Monitoring kaspad sync status..." &&
+      
+      # Wait for kaspad to be healthy (synced)
+      echo "Waiting for kaspad to complete sync..." &&
+      timeout 14400 sh -c "until docker exec kaspad /app/kaspad-healthcheck.sh; do echo \"Kaspad still syncing...\"; sleep 30; done" &&
+      
+      if [ $$? -eq 0 ]; then
+        echo "✅ Kaspad sync completed successfully!" &&
+        echo "Starting backend services..." &&
+        
+        # Start backend services
+        docker compose --project-name igra-orchestra-$${NETWORK} up -d execution-layer block-builder viaduct &&
+        
+        echo "✅ Backend services started!" &&
+        echo "Waiting for backend services to be ready..." &&
+        
+        # Wait for execution-layer to be healthy
+        timeout 300 sh -c "until docker exec execution-layer bash -c \"test -S /root/reth/socket/auth.ipc\"; do echo \"Execution layer starting...\"; sleep 10; done" &&
+        
+        # Wait for block-builder to be healthy
+        timeout 300 sh -c "until docker exec block-builder bash -c \"echo hello > /dev/tcp/$$HOSTNAME/8561\"; do echo \"Block builder starting...\"; sleep 10; done" &&
+        
+        echo "✅ Backend services are ready!" &&
+        echo "Starting RPC services..." &&
+        
+        # Start RPC services
+        docker compose --project-name igra-orchestra-$${NETWORK} up -d rpc-provider-0 kaswallet-0 &&
+        
+        echo "✅ RPC services started!" &&
+        echo "Waiting for RPC services to be ready..." &&
+        
+        # Wait for RPC services to be healthy
+        timeout 300 sh -c "until docker exec rpc-provider-0 bash -c \"echo hello > /dev/tcp/$$HOSTNAME/8535\"; do echo \"RPC provider starting...\"; sleep 10; done" &&
+        
+        echo "🎉 IGRA ORCHESTRA FULLY DEPLOYED!" &&
+        echo "================================================" &&
+        echo "RPC Endpoint: https://$${IGRA_ORCHESTRA_DOMAIN}:8545/{RPC_ACCESS_TOKEN_1}" &&
+        echo "================================================" &&
+        echo "Orchestration complete. Services will continue running."
+      else
+        echo "❌ Kaspad sync failed or timed out after 4 hours" &&
+        exit 1
+      fi
+      '
+    depends_on:
+      - kaspad
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - NETWORK=${NETWORK}
+      - IGRA_ORCHESTRA_DOMAIN=${IGRA_ORCHESTRA_DOMAIN}
+
   # CORE SERVICES
   execution-layer:
     <<: *default-service
@@ -151,12 +214,6 @@ services:
     image: igranetwork/reth:1.7.0
     entrypoint: /root/reth/run-igra-dev-el.sh
     profiles: ["backend"]
-    depends_on:
-      kaspad:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:9545:8545"  # open 8545 on localhost for blockscout
-      - "127.0.0.1:9546:8546"  # open 8546 on localhost for blockscout
     expose:
       - "8545"
       - "8546"
@@ -208,9 +265,6 @@ services:
     command: /app/jwt.hex http://execution-layer
     profiles: ["backend"]
     container_name: block-builder
-    depends_on:
-      execution-layer:
-        condition: service_healthy
     expose:
       - "8561"
     environment:
@@ -243,9 +297,6 @@ services:
     image: igranetwork/viaduct:v0.2.2
     profiles: ["backend"]
     container_name: viaduct
-    depends_on:
-      block-builder:
-        condition: service_healthy
     environment:
       - RUST_LOG
       - REPLAY_ON_ERROR
@@ -264,6 +315,9 @@ services:
     healthcheck:
       <<: *default-healthcheck
       test: ["CMD", "bash", "-c", "echo hello > /dev/tcp/${KASPAD_HOST}/${KASPAD_BORSH_PORT}"]
+    depends_on:
+      block-builder:
+        condition: service_healthy
 
   # TRAEFIK SERVICE
   traefik:
@@ -543,7 +597,6 @@ services:
       context: build/repos/rusty-kaspa
       dockerfile: ../../Dockerfile.kaspad
     image: kaspad
-    profiles: ["kaspad"]
     container_name: kaspad
     deploy:
       resources:
@@ -597,4 +650,3 @@ services:
       retries: 3
       start_period: 7200s
       test: ["CMD", "/app/kaspad-healthcheck.sh"]
-
