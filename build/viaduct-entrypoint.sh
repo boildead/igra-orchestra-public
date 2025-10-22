@@ -14,22 +14,19 @@ CONTAINER_NAME="viaduct"
 
 # Function to log messages
 log_message() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] VIADUCT: $1"
+    echo "▶ VIADUCT: $1"
 }
 
 # Function to check if storage is empty or needs restoration
 needs_backup_restore() {
     if [[ "$FORCE_RESTORE_BACKUP" == "true" ]]; then
-        log_message "Force restore backup requested"
         return 0
     fi
     
     if [[ ! -d "$STORAGE_DIR" ]] || [[ -z "$(ls -A "$STORAGE_DIR" 2>/dev/null)" ]]; then
-        log_message "Storage directory is empty, backup restoration needed"
         return 0
     fi
     
-    log_message "Storage directory has data, skipping backup restoration"
     return 1
 }
 
@@ -39,10 +36,9 @@ download_backup() {
     local s3_url="https://${S3_BACKUP_BUCKET}.s3.${S3_BACKUP_REGION}.amazonaws.com/archival-data/igra-orchestra/${NETWORK}/${backup_file}"
     local temp_file="/tmp/${backup_file}"
     
-    log_message "Downloading backup from S3: $s3_url"
+    log_message "Downloading backup..."
     
-    if curl -L --progress-bar -o "$temp_file" "$s3_url"; then
-        log_message "Download completed: $temp_file"
+    if curl -L -s -o "$temp_file" "$s3_url"; then
         echo "$temp_file"
     else
         log_message "ERROR: Download failed"
@@ -53,8 +49,6 @@ download_backup() {
 # Function to list available backups
 list_s3_backups() {
     local s3_url="https://${S3_BACKUP_BUCKET}.s3.${S3_BACKUP_REGION}.amazonaws.com/?prefix=archival-data/igra-orchestra/${NETWORK}/&list-type=2"
-    
-    log_message "Listing available backups..."
     
     # Download the S3 listing XML silently
     local xml_response
@@ -75,7 +69,6 @@ get_latest_backup() {
     backups=$(list_s3_backups)
     
     if [[ -z "$backups" ]]; then
-        log_message "ERROR: No backups found for container: $CONTAINER_NAME"
         return 1
     fi
     
@@ -88,14 +81,14 @@ restore_backup() {
     local backup_file="$1"
     local temp_file="/tmp/${backup_file}"
     
-    log_message "Restoring backup: $backup_file"
+    log_message "Restoring backup..."
     
     # Ensure storage directory exists
     mkdir -p "$STORAGE_DIR"
     
     # Extract backup to storage directory
-    if tar -xzf "$temp_file" -C "$STORAGE_DIR"; then
-        log_message "Backup restoration completed successfully"
+    if tar -xzf "$temp_file" -C "$STORAGE_DIR" 2>/dev/null; then
+        log_message "Backup restored successfully ✅"
         
         # Clean up temp file
         rm -f "$temp_file"
@@ -109,44 +102,34 @@ restore_backup() {
 
 # Function to handle backup restoration
 handle_backup_restore() {
-    log_message "Starting backup restoration process..."
-    
     # Get the latest backup
     local latest_backup
     latest_backup=$(get_latest_backup)
     if [[ $? -ne 0 ]]; then
-        log_message "WARNING: Could not find latest backup, continuing without restoration"
         return 0
     fi
-    
-    log_message "Latest backup found: $latest_backup"
     
     # Download backup
     local temp_file
     temp_file=$(download_backup "$latest_backup")
     if [[ $? -ne 0 ]]; then
-        log_message "WARNING: Backup download failed, continuing without restoration"
         return 0
     fi
     
     # Restore backup
-    if restore_backup "$latest_backup"; then
-        log_message "Backup restoration completed successfully"
-    else
-        log_message "WARNING: Backup restoration failed, continuing without restoration"
-    fi
+    restore_backup "$latest_backup"
 }
 
 # Main execution
 main() {
-    log_message "Starting viaduct entrypoint..."
-    
     # Check if backup restoration is needed
     if needs_backup_restore; then
+        log_message "Checking for backup..."
         handle_backup_restore
     fi
     
-    log_message "Starting viaduct daemon with args: $*"
+    log_message "Viaduct ready ✅"
+    log_message "Starting viaduct daemon..."
     
     # Start viaduct with original arguments
     exec /app/viaduct "$@"

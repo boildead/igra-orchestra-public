@@ -6,6 +6,7 @@ A unified Docker Compose setup that works seamlessly on both local machines and 
 
 - **Docker Engine 23.0+** and **Docker Compose V2+**
 - **16GB+ RAM** (recommended for optimal performance)
+- **20GB+ Disk Space** (logs limited to 100MB per container with 2 rotations = max 200MB per container)
 - **AMD64 or ARM64** architecture
 - **Git** access to github.com (for local builds)
 - **Domain name** with A record pointing to your server IP (for HTTPS RPC access)
@@ -19,63 +20,42 @@ git clone https://github.com/your-org/igra-orchestra-public.git
 cd igra-orchestra-public
 ```
 
-### 2. Environment Setup
+### 2. Run Interactive Setup
 
-Create your environment configuration:
+The deployment script will now guide you through the configuration process interactively. No manual file editing required!
 
-```bash
-# Generate RPC access tokens automatically
-chmod +x scripts/generate-rpc-config.sh
-./scripts/generate-rpc-config.sh
+**The script will ask you for:**
 
-# Create basic environment file
-cat > .env << EOF
-# Network Configuration
-NETWORK=testnet
-NODE_ID=your-node-name
+1. **Domain Name** (for HTTPS RPC access)
+2. **Email** (for SSL certificates)
+3. **Node ID** (unique identifier for your node)
+4. **Health Check API Key** (get from IGRA Discord)
+5. **Wallet Password** (primary wallet only, or press Enter for empty password)
 
-# Health Check (get from IGRA Discord)
-HEALTH_CHECK_API_KEY=your-api-key
+**Example Interactive Session:**
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   IGRA ORCHESTRA - AUTOMATIC SETUP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-# Domain Configuration (for HTTPS)
-IGRA_ORCHESTRA_DOMAIN=your-domain.com
-IGRA_ORCHESTRA_DOMAIN_EMAIL=your-email@domain.com
+Enter your domain name (e.g., my-node.example.com): my-node.example.com
+Enter your email for SSL certificates: admin@example.com
+Enter your node ID (unique identifier for your node): my-igra-node
+Enter your health check API key (get from IGRA Discord): abc123def456ghi789
 
-# RPC Configuration
-RPC_READ_ONLY=false
-MIN_PROTOCOL_FEE_PER_GAS_GWEI=1
-
-# Add generated RPC tokens
-EOF
-
-# Append generated RPC tokens to .env
-cat .env.rpc >> .env
+Enter wallet password (or press Enter for empty password): [hidden input]
 ```
 
-**Environment Variables (with defaults):**
+**What gets auto-generated:**
+- ✅ RPC access tokens (46 tokens)
+- ✅ Wallet addresses
+- ✅ JWT secrets
+- ✅ All other configuration has sensible defaults
 
-All configuration has sensible defaults for testnet demo deployment. Only these are required:
-
-```bash
-# Required for demo
-NODE_ID=your-node-name
-HEALTH_CHECK_API_KEY=your-api-key  # Get from IGRA Discord
-
-# Optional (has defaults)
-NETWORK=testnet
-S3_BACKUP_BUCKET=igralabs-viaduct-archival-data
-S3_BACKUP_REGION=eu-north-1
-FORCE_RESTORE_BACKUP=false
-RPC_READ_ONLY=false
-MIN_PROTOCOL_FEE_PER_GAS_GWEI=1
-
-# Auto-generated (no manual configuration needed)
-W0_WALLET_TO_ADDRESS=auto  # Generated automatically
-W0_KASWALLET_PASSWORD=     # Empty password (auto-generated)
-RPC_ACCESS_TOKEN_1=...     # Generated automatically
-RPC_ACCESS_TOKEN_2=...     # Generated automatically
-# ... (46 tokens total)
-```
+**The script will display:**
+- 🔑 Your wallet address
+- 🌐 Your RPC endpoint
+- 📊 Instructions for monitoring progress
 
 ### 3. Deploy Everything Automatically 🚀
 
@@ -87,12 +67,38 @@ chmod +x scripts/start-full-deployment.sh
 ./scripts/start-full-deployment.sh
 ```
 
-This will:
-- ✅ Start kaspad and wait for sync automatically
-- ✅ Start backend services when sync completes
-- ✅ Start RPC services when backend is ready
-- ✅ Generate wallets and configure everything automatically
-- ✅ Handle the entire 4-6 hour sync process without manual intervention
+**What this does automatically:**
+- ✅ Creates `.env` file with defaults
+- ✅ Generates RPC access tokens (46 tokens)
+- ✅ Validates your configuration
+- ✅ Starts kaspad and waits for sync automatically
+- ✅ Starts backend services when sync completes
+- ✅ Starts RPC services when backend is ready
+- ✅ Generates wallets and configures everything automatically
+- ✅ Handles the entire 4-6 hour sync process without manual intervention
+
+**Monitor Your Deployment:**
+
+```bash
+# Check deployment status (recommended)
+./scripts/check-status.sh
+
+# View orchestrator logs
+docker compose -f docker-compose.full.yml logs -f sync-orchestrator
+
+# View kaspad sync progress
+docker compose -f docker-compose.full.yml logs -f kaspad
+
+# View all services
+docker compose -f docker-compose.full.yml ps
+```
+
+The `check-status.sh` script shows:
+- ✅ Service status (running/healthy)
+- 📊 Kaspad sync progress
+- 🔑 Your wallet address
+- 🌐 Your RPC endpoint
+- 📋 Overall deployment status
 
 **Option B: Manual Step-by-Step Deployment**
 
@@ -198,21 +204,16 @@ No manual configuration needed.
 ================================================
 ```
 
-### Manual Wallet Management (Optional)
+### Simplified Setup
 
-Only if you want to use existing wallets:
+The automatic installation focuses on essential configuration only:
 
-1. **Generate wallet manually**:
-   ```bash
-   docker run --rm -v $(pwd)/keys:/keys --entrypoint /app/kaswallet-create \
-     igranetwork/kaswallet:latest --testnet -k /keys/keys.kaswallet-0.json
-   ```
+1. **Primary wallet only** - No additional workers to configure
+2. **Auto-generated addresses** - Wallet addresses are generated automatically
+3. **Sensible defaults** - S3 backup and other settings use proven defaults
+4. **No manual configuration** - Everything is handled automatically
 
-2. **Set in .env file**:
-   ```bash
-   W0_WALLET_TO_ADDRESS=kaspatest:your-existing-address
-   W0_KASWALLET_PASSWORD=your-password
-   ```
+This streamlined approach ensures a quick and reliable deployment!
 
 ## Backup Restoration
 
@@ -368,6 +369,47 @@ docker compose --profile frontend-w3 up -d
 # Each worker needs its own wallet (auto-generated)
 # Check logs for all wallet addresses:
 docker compose logs kaswallet-0 kaswallet-1 kaswallet-2 | grep "Wallet Address"
+```
+
+## Log Management
+
+### Automatic Log Rotation
+
+All containers are configured with automatic log rotation to prevent disk space issues:
+
+- **Max log size**: 100MB per container
+- **Max log files**: 2 rotations
+- **Total max per container**: 200MB (100MB × 2)
+- **Log driver**: json-file (default)
+
+### View Container Logs
+
+```bash
+# View logs for specific service
+docker compose logs -f kaspad
+
+# View logs with tail
+docker compose logs --tail=100 -f execution-layer
+
+# View all logs
+docker compose logs -f
+```
+
+### Check Log Size
+
+```bash
+# Check log file sizes
+docker ps -q | xargs -I {} sh -c 'echo "Container: {}"; docker inspect {} --format="{{.LogPath}}" | xargs du -h'
+```
+
+### Manual Log Cleanup (if needed)
+
+```bash
+# Truncate logs for specific container
+docker compose logs --tail=0 kaspad
+
+# Restart with fresh logs
+docker compose restart kaspad
 ```
 
 ## Security Notes

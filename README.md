@@ -17,21 +17,33 @@ A unified Docker Compose-based development environment for IGRA Orchestra compon
 git clone https://github.com/your-org/igra-orchestra-public.git
 cd igra-orchestra-public
 
-# Generate RPC tokens automatically
-./scripts/generate-rpc-config.sh
-
-# Start everything with automatic sync orchestration (recommended)
+# One-command deployment (handles everything automatically)
 ./scripts/start-full-deployment.sh
-
-# OR manually step by step:
-# docker compose --profile kaspad up -d
-# # Wait for sync (4-6 hours), then:
-# docker compose --profile backend up -d
-# docker compose --profile frontend-w1 up -d
 ```
 
-### FluxCloud Deployment
-[![Deploy on FluxCloud](https://img.shields.io/badge/Deploy%20on-FluxCloud-blue)](https://home.runonflux.io)
+**Interactive Setup:**
+The script will guide you through configuration with prompts for:
+- Domain name (for HTTPS RPC access)
+- Email (for SSL certificates)
+- Node ID (unique identifier for your node)
+- Health check API key (from IGRA Discord)
+- Wallet password (primary wallet only)
+
+**What gets auto-generated:**
+- ✅ RPC access tokens (46 tokens)
+- ✅ JWT secrets
+- ✅ Wallet address
+- ✅ All configuration with sensible defaults
+- ✅ No manual file editing required!
+
+**Monitor Progress:**
+```bash
+# Check deployment status
+./scripts/check-status.sh
+
+# View orchestrator logs
+docker compose -f docker-compose.full.yml logs -f sync-orchestrator
+```
 
 See [`doc/quick-setup-unified.md`](doc/quick-setup-unified.md) for complete setup instructions.
 
@@ -39,6 +51,7 @@ See [`doc/quick-setup-unified.md`](doc/quick-setup-unified.md) for complete setu
 
 - **Docker Engine 23.0+** and **Docker Compose V2+**
 - **16GB+ RAM** (recommended for optimal performance)
+- **20GB+ Disk Space** (logs auto-rotate at 100MB per container, max 200MB total)
 - **AMD64 or ARM64** architecture
 - **Git** access (for local builds)
 - **Domain name** (for HTTPS RPC access)

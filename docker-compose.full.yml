@@ -22,8 +22,10 @@ networks:
   traefik-network:
 
 x-default-logging: &default-logging
-  driver: "${LOGGING_DRIVER:-syslog}"
+  driver: "${LOGGING_DRIVER:-json-file}"
   options:
+    max-size: "100m"
+    max-file: "2"
     tag: "igra-orchestra-${NETWORK}/{{.Name}}/{{.ID}}"
 
 x-default-healthcheck: &default-healthcheck
@@ -147,54 +149,61 @@ services:
   # SYNC ORCHESTRATOR SERVICE
   sync-orchestrator:
     <<: *default-service
-    image: alpine:latest
+    image: docker:latest
     container_name: sync-orchestrator
     command: >
       sh -c '
-      echo "=== IGRA ORCHESTRA SYNC ORCHESTRATOR ===" &&
-      echo "Starting sync orchestration..." &&
-      echo "This service will automatically start backend services after kaspad sync completes." &&
-      echo "Monitoring kaspad sync status..." &&
+      apk add --no-cache docker-cli-compose >/dev/null 2>&1 &&
       
-      # Wait for kaspad to be healthy (synced)
-      echo "Waiting for kaspad to complete sync..." &&
-      timeout 14400 sh -c "until docker exec kaspad /app/kaspad-healthcheck.sh; do echo \"Kaspad still syncing...\"; sleep 30; done" &&
+      echo "" &&
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
+      echo "   IGRA ORCHESTRA - SYNC ORCHESTRATOR" &&
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
+      echo "" &&
+      echo "▶ Waiting for kaspad to sync (4-6 hours)..." &&
+      echo "" &&
+      
+      timeout 14400 sh -c "until docker exec kaspad /app/kaspad-healthcheck.sh 2>/dev/null; do sleep 60; done" &&
       
       if [ $$? -eq 0 ]; then
-        echo "✅ Kaspad sync completed successfully!" &&
-        echo "Starting backend services..." &&
+        echo "✅ Kaspad synced!" &&
+        echo "▶ Starting backend services..." &&
         
-        # Start backend services
-        docker compose --project-name igra-orchestra-$${NETWORK} up -d execution-layer block-builder viaduct &&
+        docker compose --project-name igra-orchestra-$${NETWORK}-full --profile backend up -d execution-layer block-builder viaduct >/dev/null 2>&1 &&
+        echo "✅ Backend services started" &&
         
-        echo "✅ Backend services started!" &&
-        echo "Waiting for backend services to be ready..." &&
+        echo "▶ Waiting for backend to initialize..." &&
+        timeout 300 sh -c "until docker exec execution-layer bash -c \"test -S /root/reth/socket/auth.ipc\" 2>/dev/null; do sleep 10; done" &&
+        timeout 300 sh -c "until docker exec block-builder bash -c \"echo hello > /dev/tcp/$$HOSTNAME/8561\" 2>/dev/null; do sleep 10; done" &&
         
-        # Wait for execution-layer to be healthy
-        timeout 300 sh -c "until docker exec execution-layer bash -c \"test -S /root/reth/socket/auth.ipc\"; do echo \"Execution layer starting...\"; sleep 10; done" &&
+        echo "✅ Backend ready!" &&
+        echo "▶ Starting RPC provider..." &&
         
-        # Wait for block-builder to be healthy
-        timeout 300 sh -c "until docker exec block-builder bash -c \"echo hello > /dev/tcp/$$HOSTNAME/8561\"; do echo \"Block builder starting...\"; sleep 10; done" &&
+        docker compose --project-name igra-orchestra-$${NETWORK}-full --profile frontend up -d rpc-provider-0 >/dev/null 2>&1 &&
+        echo "✅ RPC provider started" &&
         
-        echo "✅ Backend services are ready!" &&
-        echo "Starting RPC services..." &&
+        echo "▶ Waiting for RPC to initialize..." &&
+        timeout 300 sh -c "until docker exec rpc-provider-0 bash -c \"echo hello > /dev/tcp/$$HOSTNAME/8535\" 2>/dev/null; do sleep 10; done" &&
+        echo "✅ RPC provider ready!" &&
         
-        # Start RPC services
-        docker compose --project-name igra-orchestra-$${NETWORK} up -d rpc-provider-0 kaswallet-0 &&
+        WALLET_ADDR=$$(docker logs kaswallet-0 2>/dev/null | grep -oE "kaspatest:[a-zA-Z0-9]+" | head -1) &&
         
-        echo "✅ RPC services started!" &&
-        echo "Waiting for RPC services to be ready..." &&
-        
-        # Wait for RPC services to be healthy
-        timeout 300 sh -c "until docker exec rpc-provider-0 bash -c \"echo hello > /dev/tcp/$$HOSTNAME/8535\"; do echo \"RPC provider starting...\"; sleep 10; done" &&
-        
-        echo "🎉 IGRA ORCHESTRA FULLY DEPLOYED!" &&
-        echo "================================================" &&
-        echo "RPC Endpoint: https://$${IGRA_ORCHESTRA_DOMAIN}:8545/{RPC_ACCESS_TOKEN_1}" &&
-        echo "================================================" &&
-        echo "Orchestration complete. Services will continue running."
+        echo "" &&
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
+        echo "   ✅ DEPLOYMENT COMPLETE!" &&
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
+        echo "" &&
+        echo "🔑 Wallet Address:" &&
+        echo "   $$WALLET_ADDR" &&
+        echo "" &&
+        echo "🌐 RPC Endpoint:" &&
+        echo "   https://$${IGRA_ORCHESTRA_DOMAIN}:8545/{TOKEN}" &&
+        echo "" &&
+        echo "Run ./scripts/check-status.sh for details" &&
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
+        echo ""
       else
-        echo "❌ Kaspad sync failed or timed out after 4 hours" &&
+        echo "❌ Kaspad sync timeout" &&
         exit 1
       fi
       '
@@ -323,7 +332,6 @@ services:
   traefik:
     <<: *default-service
     image: traefik:v3.0
-    profiles: ["frontend-w1", "frontend-w2", "frontend-w3", "frontend-w4", "frontend-w5", "kaspa-explorer"]
     container_name: traefik
     command:
       - "--api.dashboard=true"
@@ -388,7 +396,7 @@ services:
   # WORKER SERVICES
   rpc-provider-0:
     <<: *rpc-provider-base
-    profiles: ["frontend-w1", "frontend-w2", "frontend-w3", "frontend-w4", "frontend-w5"]
+    profiles: ["frontend"]
     container_name: rpc-provider-0
     environment:
       <<: *rpc-provider-environment
@@ -413,7 +421,6 @@ services:
 
   kaswallet-0:
     <<: *kaswallet-base
-    profiles: ["frontend-w1", "frontend-w2", "frontend-w3", "frontend-w4", "frontend-w5", "kaswallets"]
     container_name: kaswallet-0
     ports:
       - "127.0.0.1:8082:8082"  # open 8082 on localhost for entry transactions

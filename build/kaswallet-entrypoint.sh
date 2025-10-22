@@ -10,7 +10,7 @@ NETWORK="${NETWORK:-testnet}"
 
 # Function to log messages
 log_message() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] KASWALLET: $1"
+    echo "▶ WALLET: $1"
 }
 
 # Function to extract wallet address from kaswallet-create output
@@ -29,18 +29,16 @@ save_wallet_address() {
         # Ensure shared directory exists
         mkdir -p /shared
         echo "$wallet_address" > "$wallet_file"
-        log_message "Wallet address saved to shared volume: $wallet_address"
     fi
 }
 
 # Function to generate wallet if needed
 generate_wallet_if_needed() {
     if [[ -f "$WALLET_KEY_FILE" ]]; then
-        log_message "Wallet key file already exists: $WALLET_KEY_FILE"
         return 0
     fi
     
-    log_message "Wallet key file not found, generating new wallet..."
+    log_message "Generating new wallet..."
     
     # Generate wallet with empty password
     local output
@@ -54,22 +52,18 @@ generate_wallet_if_needed() {
     wallet_address=$(extract_wallet_address "$output")
     
     if [[ -n "$wallet_address" ]]; then
-        log_message "================================================"
-        log_message "WALLET GENERATED SUCCESSFULLY"
-        log_message "================================================"
-        log_message "Wallet Address: $wallet_address"
-        log_message "Key File: $WALLET_KEY_FILE"
-        log_message "Password: (empty)"
-        log_message "================================================"
-        log_message "Wallet address automatically configured for RPC!"
-        log_message "No manual configuration needed."
-        log_message "================================================"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "   ✅ WALLET GENERATED"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Wallet Address: $wallet_address"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
         
         # Save wallet address to shared volume for RPC provider
         save_wallet_address "$wallet_address"
-    else
-        log_message "WARNING: Could not extract wallet address from output"
-        log_message "Wallet generation output: $output"
     fi
     
     return 0
@@ -78,36 +72,34 @@ generate_wallet_if_needed() {
 # Function to verify wallet file
 verify_wallet_file() {
     if [[ ! -f "$WALLET_KEY_FILE" ]]; then
-        log_message "ERROR: Wallet key file not found after generation: $WALLET_KEY_FILE"
+        log_message "ERROR: Wallet key file not found"
         return 1
     fi
     
     if [[ ! -s "$WALLET_KEY_FILE" ]]; then
-        log_message "ERROR: Wallet key file is empty: $WALLET_KEY_FILE"
+        log_message "ERROR: Wallet key file is empty"
         return 1
     fi
     
-    log_message "Wallet key file verified: $WALLET_KEY_FILE"
     return 0
 }
 
 # Main execution
 main() {
-    log_message "Starting kaswallet entrypoint..."
-    
     # Generate wallet if needed
     if ! generate_wallet_if_needed; then
-        log_message "ERROR: Failed to generate wallet, exiting"
+        log_message "ERROR: Failed to generate wallet"
         exit 1
     fi
     
     # Verify wallet file
     if ! verify_wallet_file; then
-        log_message "ERROR: Wallet verification failed, exiting"
+        log_message "ERROR: Wallet verification failed"
         exit 1
     fi
     
-    log_message "Starting kaswallet daemon with args: $*"
+    log_message "Wallet ready ✅"
+    log_message "Starting wallet daemon..."
     
     # Start kaswallet with original arguments
     exec /app/kaswallet "$@"

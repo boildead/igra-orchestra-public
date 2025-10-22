@@ -21,8 +21,10 @@ networks:
   traefik-network:
 
 x-default-logging: &default-logging
-  driver: "${LOGGING_DRIVER:-syslog}"
+  driver: "${LOGGING_DRIVER:-json-file}"
   options:
+    max-size: "100m"
+    max-file: "2"
     tag: "igra-orchestra-${NETWORK}/{{.Name}}/{{.ID}}"
 
 x-default-healthcheck: &default-healthcheck
