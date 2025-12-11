@@ -4,9 +4,21 @@
 
 set -e
 
-# Configuration
-WALLET_KEY_FILE="/app/keys.json"
+# Configuration - support both /keys and /app/keys mount points
+if [ -d "/keys" ]; then
+    WALLET_KEY_DIR="/keys"
+elif [ -d "/app/keys" ]; then
+    WALLET_KEY_DIR="/app/keys"
+else
+    # Default to /keys if neither exists
+    WALLET_KEY_DIR="/keys"
+fi
+
+WALLET_KEY_FILE="$WALLET_KEY_DIR/keys.json"
 NETWORK="${NETWORK:-testnet}"
+
+# Ensure keys directory exists
+mkdir -p "$WALLET_KEY_DIR"
 
 # Function to log messages
 log_message() {
@@ -101,8 +113,16 @@ main() {
     log_message "Wallet ready ✅"
     log_message "Starting wallet daemon..."
     
-    # Start kaswallet with original arguments
-    exec /app/kaswallet "$@"
+    # Start kaswallet (daemon) with original arguments
+    # The prebuilt image may have either 'kaswallet' or 'kaswallet-daemon'
+    if [[ -f /app/kaswallet ]]; then
+        exec /app/kaswallet "$@"
+    elif [[ -f /app/kaswallet-daemon ]]; then
+        exec /app/kaswallet-daemon "$@"
+    else
+        log_message "ERROR: kaswallet binary not found"
+        exit 1
+    fi
 }
 
 # Run main function

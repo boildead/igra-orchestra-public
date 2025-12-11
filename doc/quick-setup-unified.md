@@ -20,9 +20,21 @@ git clone https://github.com/your-org/igra-orchestra-public.git
 cd igra-orchestra-public
 ```
 
-### 2. Run Interactive Setup
+### 2. Run Automatic Deployment
 
-The deployment script will now guide you through the configuration process interactively. No manual file editing required!
+The deployment script handles everything automatically, including building kaspad from source if needed:
+
+```bash
+chmod +x scripts/start-full-deployment.sh
+./scripts/start-full-deployment.sh
+```
+
+The script will:
+- Build kaspad from source on first run (~10-15 minutes)
+- Guide you through configuration interactively
+- Pull prebuilt images for other services
+- Start all services automatically
+- No manual file editing required!
 
 **The script will ask you for:**
 
@@ -275,7 +287,7 @@ curl -X POST https://your-domain.com:8545/$TOKEN \
 docker compose ps
 
 # Check sync status
-docker compose logs kaspad | grep -E "(synced|IDB:|DAA)"
+docker compose logs kaspad | grep -E "(synced|IBD:|DAA)"
 
 # Monitor specific service
 docker compose logs -f execution-layer

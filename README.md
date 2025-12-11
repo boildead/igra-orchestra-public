@@ -10,16 +10,31 @@ A unified Docker Compose-based development environment for IGRA Orchestra compon
 - 🔍 **Sync Healthcheck**: Kaspad sync status monitoring via RPC API
 - 🌐 **FluxCloud Compatible**: Ready for deployment on FluxCloud
 
+## Setup Requirements
+
+- **Docker Engine 23.0+** and **Docker Compose V2+**
+- **16GB+ RAM** (recommended for optimal performance)
+- **20GB+ Disk Space** (logs auto-rotate at 100MB per container, max 200MB total)
+- **AMD64 or ARM64** architecture
+- **Git** access (for local builds)
+- **Domain name** (for HTTPS RPC access)
+- **OpenSSL** (for generating RPC keys)
+
 ## Quick Start
 
-### Local Deployment
+### Automatic Deployment (Recommended)
+One command handles everything - builds kaspad from source (first time only) and uses prebuilt images for other services.
+
 ```bash
 git clone https://github.com/your-org/igra-orchestra-public.git
 cd igra-orchestra-public
 
 # One-command deployment (handles everything automatically)
+chmod +x scripts/start-full-deployment.sh
 ./scripts/start-full-deployment.sh
 ```
+
+**Note:** First run will build kaspad from source (~10-15 minutes). Subsequent runs skip this step.
 
 **Interactive Setup:**
 The script will guide you through configuration with prompts for:
@@ -47,18 +62,9 @@ docker compose -f docker-compose.full.yml logs -f sync-orchestrator
 
 See [`doc/quick-setup-unified.md`](doc/quick-setup-unified.md) for complete setup instructions.
 
-## Setup Requirements
-
-- **Docker Engine 23.0+** and **Docker Compose V2+**
-- **16GB+ RAM** (recommended for optimal performance)
-- **20GB+ Disk Space** (logs auto-rotate at 100MB per container, max 200MB total)
-- **AMD64 or ARM64** architecture
-- **Git** access (for local builds)
-- **Domain name** (for HTTPS RPC access)
-
 ## Documentation Cover
 
-- [`doc/quick-setup-unified.md`](doc/quick-setup-unified.md) - **Unified setup for local and FluxCloud**
+- [`doc/quick-setup-unified.md`](doc/quick-setup-unified.md) - **Unified setup for local**
 - [`doc/quick-setup-prebuilt.md`](doc/quick-setup-prebuilt.md) - Legacy prebuilt setup
 - [`doc/quick-setup-rpc.md`](doc/quick-setup-rpc.md) - RPC configuration details
 

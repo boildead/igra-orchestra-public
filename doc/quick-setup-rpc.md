@@ -28,19 +28,38 @@ sed -n '/BEGIN RPC CONFIG/,/END RPC CONFIG/p' .env.backend-rpc.example | grep -v
 ## Wallet Setup
 
 ### 1. Generate Wallet Key
+
+**For docker-compose.full.yml (recommended):**
+```bash
+docker run --rm -it -v $(pwd)/keys/wallet-0:/keys --entrypoint /app/kaswallet-create \
+  igranetwork/kaswallet:v0.2.1 --testnet -k /keys/keys.json
+```
+
+**For docker-compose.yml:**
 ```bash
 docker run --rm -it -v $(pwd)/keys:/keys --entrypoint /app/kaswallet-create \
-  igranetwork/kaswallet:latest --testnet -k /keys/keys.kaswallet-0.json
+  igranetwork/kaswallet:v0.2.1 --testnet -k /keys/keys.kaswallet-0.json
 ```
+
 When prompted for password, press Enter for empty password or set your own.
 **IMPORTANT: Save the mnemonic phrase displayed!**
 
 ### 2. Get Wallet Address
 
 **Terminal 1:** Start wallet daemon (leave running)
+
+**For docker-compose.full.yml:**
+```bash
+docker run --rm -v $(pwd)/keys/wallet-0:/keys --network igra-orchestra-testnet-full_igra-network \
+  -p 8082:8082 --name kaswallet-temp igranetwork/kaswallet:v0.2.1 \
+  --testnet --keys /keys/keys.json \
+  --server ws://kaspad:17210 --listen 0.0.0.0:8082
+```
+
+**For docker-compose.yml:**
 ```bash
 docker run --rm -v $(pwd)/keys:/keys --network igra-orchestra-testnet_igra-network \
-  -p 8082:8082 --name kaswallet-temp igranetwork/kaswallet:latest \
+  -p 8082:8082 --name kaswallet-temp igranetwork/kaswallet:v0.2.1 \
   --testnet --keys /keys/keys.kaswallet-0.json \
   --server ws://kaspad:17210 --listen 0.0.0.0:8082
 ```
@@ -55,7 +74,7 @@ Expected output:
 **Terminal 2:** Get wallet address
 ```bash
 docker run --rm --network host --entrypoint /app/test_client \
-  igranetwork/kaswallet:latest
+  igranetwork/kaswallet:v0.2.1
 ```
 
 Output:

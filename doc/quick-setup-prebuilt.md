@@ -27,7 +27,7 @@ chmod +x setup-repos.sh
 docker compose --profile kaspad up -d
 ```
 
-Usually it takes 4-6 hours to sync depending on the machine and network speed. You can check the sync progress with `docker compose logs -f kaspad` and wait until `IDB: 100%` is reached.
+Usually it takes 4-6 hours to sync depending on the machine and network speed. You can check the sync progress with `docker compose logs -f kaspad` and wait until `IBD: 100%` is reached.
 
 4) Make execution-layer script executable
 ```bash
@@ -75,7 +75,7 @@ docker logs -f block-builder | docker run -i --rm --entrypoint /app/reorg_analyz
   viaduct  | [.... INFO  viaduct::uni_storage] Starting to handle notifications
   viaduct exited with code 0
   ```
-  - Kaspa is not fully synced yet. Wait for `IDB: 100%` in Kaspad logs, then start backend again.
+  - Kaspa is not fully synced yet. Wait for `IBD: 100%` in Kaspad logs, then start backend again.
 - Permission error on execution-layer startup:
 ```bash
 chmod +x build/repos/execution-layer/run-igra-dev-el.sh

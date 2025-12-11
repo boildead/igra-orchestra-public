@@ -10,11 +10,6 @@ volumes:
       type: tmpfs
       device: tmpfs
       o: size=10m
-  kaswallet_0_keys:
-  kaswallet_1_keys:
-  kaswallet_2_keys:
-  kaswallet_3_keys:
-  kaswallet_4_keys:
   shared_config:
 
 networks:
@@ -59,9 +54,6 @@ x-rpc-provider-environment: &rpc-provider-environment
 
 x-rpc-provider-base: &rpc-provider-base
   <<: *default-service
-  build:
-    context: build/repos/igra-rpc-provider
-    dockerfile: ../../Dockerfile.rpc-provider
   image: igranetwork/rpc-provider:v0.2.1
   environment: *rpc-provider-environment
   expose:
@@ -128,9 +120,6 @@ x-rpc-provider-base: &rpc-provider-base
 
 x-kaswallet-base: &kaswallet-base
   <<: *default-service
-  build:
-    context: build/repos/kaswallet
-    dockerfile: ../../Dockerfile.kaswallet
   image: igranetwork/kaswallet:v0.2.1
   expose:
     - "8082"
@@ -141,7 +130,7 @@ x-kaswallet-base: &kaswallet-base
   command: >
     --${NETWORK}
     --logs-level=${RUST_LOG}
-    --keys /app/keys.json
+    --keys /keys/keys.json
     --server ws://${KASPAD_HOST}:${KASPAD_BORSH_PORT}
     --listen 0.0.0.0:8082
 
@@ -149,71 +138,289 @@ services:
   # SYNC ORCHESTRATOR SERVICE
   sync-orchestrator:
     <<: *default-service
+    restart: "no"
     image: docker:latest
     container_name: sync-orchestrator
-    command: >
-      sh -c '
-      apk add --no-cache docker-cli-compose >/dev/null 2>&1 &&
-      
-      echo "" &&
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
-      echo "   IGRA ORCHESTRA - SYNC ORCHESTRATOR" &&
-      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
-      echo "" &&
-      echo "▶ Waiting for kaspad to sync (4-6 hours)..." &&
-      echo "" &&
-      
-      timeout 14400 sh -c "until docker exec kaspad /app/kaspad-healthcheck.sh 2>/dev/null; do sleep 60; done" &&
-      
-      if [ $$? -eq 0 ]; then
-        echo "✅ Kaspad synced!" &&
-        echo "▶ Starting backend services..." &&
-        
-        docker compose --project-name igra-orchestra-$${NETWORK}-full --profile backend up -d execution-layer block-builder viaduct >/dev/null 2>&1 &&
-        echo "✅ Backend services started" &&
-        
-        echo "▶ Waiting for backend to initialize..." &&
-        timeout 300 sh -c "until docker exec execution-layer bash -c \"test -S /root/reth/socket/auth.ipc\" 2>/dev/null; do sleep 10; done" &&
-        timeout 300 sh -c "until docker exec block-builder bash -c \"echo hello > /dev/tcp/$$HOSTNAME/8561\" 2>/dev/null; do sleep 10; done" &&
-        
-        echo "✅ Backend ready!" &&
-        echo "▶ Starting RPC provider..." &&
-        
-        docker compose --project-name igra-orchestra-$${NETWORK}-full --profile frontend up -d rpc-provider-0 >/dev/null 2>&1 &&
-        echo "✅ RPC provider started" &&
-        
-        echo "▶ Waiting for RPC to initialize..." &&
-        timeout 300 sh -c "until docker exec rpc-provider-0 bash -c \"echo hello > /dev/tcp/$$HOSTNAME/8535\" 2>/dev/null; do sleep 10; done" &&
-        echo "✅ RPC provider ready!" &&
-        
-        WALLET_ADDR=$$(docker logs kaswallet-0 2>/dev/null | grep -oE "kaspatest:[a-zA-Z0-9]+" | head -1) &&
-        
-        echo "" &&
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
-        echo "   ✅ DEPLOYMENT COMPLETE!" &&
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
-        echo "" &&
-        echo "🔑 Wallet Address:" &&
-        echo "   $$WALLET_ADDR" &&
-        echo "" &&
-        echo "🌐 RPC Endpoint:" &&
-        echo "   https://$${IGRA_ORCHESTRA_DOMAIN}:8545/{TOKEN}" &&
-        echo "" &&
-        echo "Run ./scripts/check-status.sh for details" &&
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" &&
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache docker-cli-compose coreutils bash >/dev/null 2>&1 &&
+        exec bash << 'ENDBASH'
         echo ""
-      else
-        echo "❌ Kaspad sync timeout" &&
-        exit 1
-      fi
-      '
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "   IGRA ORCHESTRA - SYNC ORCHESTRATOR"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        
+        # Get the host path for the compose directory
+        # sync-orchestrator mounts the host directory to /compose
+        # We need to use the host path when running docker compose commands for path resolution
+        # But use /compose/.env for environment variables (mounted from host)
+        COMPOSE_HOST_PATH=$$(docker inspect sync-orchestrator --format '{{range .Mounts}}{{if eq .Destination "/compose"}}{{.Source}}{{end}}{{end}}' 2>/dev/null || echo "/root/igra-orchestra-public")
+        export COMPOSE_HOST_PATH
+        export COMPOSE_PROJECT_DIR="$$COMPOSE_HOST_PATH"
+        # Use .env from inside container (mounted from host)
+        COMPOSE_ENV_FILE="/compose/.env"
+        export COMPOSE_ENV_FILE
+        
+        echo "▶ Waiting for kaspad to sync (this may take 4-6 hours)..."
+        echo ""
+        
+        # Use NUM_WORKERS from environment (default to 1)
+        NUM_WORKERS=${NUM_WORKERS:-1}
+        
+        # Wait for kaspad sync indefinitely until sync completes
+        until docker logs kaspad --tail 2000 2>/dev/null | grep -E -q "(IBD:.* blocks \(100%\)|Accepted .* blocks .* via relay)"; do
+          sleep 10
+        done
+        
+        # Sync completed successfully, proceed with deployment
+        echo "✅ Kaspad synced!"
+        echo "▶ Starting kaswallet-0..."
+        
+        # Remove any container stuck in created/exited state
+        CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' kaswallet-0 2>/dev/null || echo "")
+        if [ "$$CONTAINER_STATE" = "created" ] || [ "$$CONTAINER_STATE" = "exited" ]; then
+          echo "  Removing stuck container kaswallet-0 (state: $$CONTAINER_STATE)..."
+          docker rm -f kaswallet-0 >/dev/null 2>&1 || true
+        fi
+        
+        docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full up -d --remove-orphans kaswallet-0
+        
+        # Verify container actually started and is running
+        sleep 2
+        CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' kaswallet-0 2>/dev/null || echo "missing")
+        if [ "$$CONTAINER_STATE" != "running" ]; then
+          echo "⚠️  Kaswallet-0 failed to start (state: $$CONTAINER_STATE), removing and retrying..."
+          docker rm -f kaswallet-0 >/dev/null 2>&1 || true
+          docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full up -d --force-recreate kaswallet-0
+          
+          # Verify again
+          sleep 2
+          CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' kaswallet-0 2>/dev/null || echo "missing")
+          if [ "$$CONTAINER_STATE" != "running" ]; then
+            echo "❌ Kaswallet-0 still not running after retry (state: $$CONTAINER_STATE)"
+          fi
+        fi
+        echo "✅ Kaswallet-0 started"
+        
+        echo "▶ Waiting for kaswallet-0 to connect..."
+        timeout 300 bash -c "until docker inspect --format='{{.State.Health.Status}}' kaswallet-0 2>/dev/null | grep -q 'healthy'; do sleep 10; done"
+        echo "✅ Kaswallet-0 ready!"
+        
+        # Start additional workers if NUM_WORKERS > 1
+        if [ $$NUM_WORKERS -gt 1 ]; then
+          echo "▶ Starting additional workers ($$NUM_WORKERS total)..."
+          
+          # Determine which profile to use based on NUM_WORKERS
+          case $$NUM_WORKERS in
+            2) PROFILE="frontend-w2" ;;
+            3) PROFILE="frontend-w3" ;;
+            4) PROFILE="frontend-w4" ;;
+            5) PROFILE="frontend-w5" ;;
+            *) PROFILE="frontend" ;;
+          esac
+          
+          # Start additional kaswallet services
+          for i in $$(seq 1 $$((NUM_WORKERS-1))); do
+            echo "  Starting kaswallet-$$i..."
+            
+            # Remove any container stuck in created/exited state
+            CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "kaswallet-$$i" 2>/dev/null || echo "")
+            if [ "$$CONTAINER_STATE" = "created" ] || [ "$$CONTAINER_STATE" = "exited" ]; then
+              echo "    Removing stuck container kaswallet-$$i (state: $$CONTAINER_STATE)..."
+              docker rm -f "kaswallet-$$i" >/dev/null 2>&1 || true
+            fi
+            
+            docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full --profile $$PROFILE up -d --remove-orphans kaswallet-$$i
+            sleep 2
+            
+            CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "kaswallet-$$i" 2>/dev/null || echo "missing")
+            if [ "$$CONTAINER_STATE" != "running" ]; then
+              echo "    ⚠️  Kaswallet-$$i failed to start (state: $$CONTAINER_STATE), removing and retrying..."
+              docker rm -f "kaswallet-$$i" >/dev/null 2>&1 || true
+              docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full --profile $$PROFILE up -d --force-recreate kaswallet-$$i
+              
+              # Verify again
+              sleep 2
+              CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "kaswallet-$$i" 2>/dev/null || echo "missing")
+              if [ "$$CONTAINER_STATE" != "running" ]; then
+                echo "    ❌ Kaswallet-$$i still not running after retry (state: $$CONTAINER_STATE)"
+              fi
+            fi
+            echo "  ✅ Kaswallet-$$i started"
+          done
+          
+          echo "✅ Additional workers started"
+        fi
+        
+        echo "▶ Starting backend services..."
+        
+        # Remove any containers stuck in created/exited state before starting
+        for container in execution-layer block-builder viaduct; do
+          CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "$$container" 2>/dev/null || echo "")
+          if [ "$$CONTAINER_STATE" = "created" ] || [ "$$CONTAINER_STATE" = "exited" ]; then
+            echo "  Removing stuck container $$container (state: $$CONTAINER_STATE)..."
+            docker rm -f "$$container" >/dev/null 2>&1 || true
+          fi
+        done
+        
+        docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full --profile backend up -d --remove-orphans execution-layer block-builder viaduct
+        
+        # Verify containers actually started and are running (not just created)
+        sleep 3
+        for container in execution-layer block-builder viaduct; do
+          CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "$$container" 2>/dev/null || echo "missing")
+          if [ "$$CONTAINER_STATE" != "running" ]; then
+            echo "  ⚠️  $$container is not running (state: $$CONTAINER_STATE), removing and retrying..."
+            docker rm -f "$$container" >/dev/null 2>&1 || true
+          fi
+        done
+        
+        # Retry any failed containers with force-recreate
+        FAILED_CONTAINERS=$$(for container in execution-layer block-builder viaduct; do
+          CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "$$container" 2>/dev/null || echo "missing")
+          if [ "$$CONTAINER_STATE" != "running" ]; then
+            echo "$$container"
+          fi
+        done)
+        
+        if [ -n "$$FAILED_CONTAINERS" ]; then
+          echo "  Retrying failed containers with force-recreate..."
+          docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full --profile backend up -d --force-recreate $$FAILED_CONTAINERS
+          
+          # Verify again after retry
+          sleep 3
+          for container in $$FAILED_CONTAINERS; do
+            CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "$$container" 2>/dev/null || echo "missing")
+            if [ "$$CONTAINER_STATE" != "running" ]; then
+              echo "  ❌ $$container still not running after retry (state: $$CONTAINER_STATE)"
+            fi
+          done
+        fi
+        
+        echo "✅ Backend services started"
+        
+        echo "▶ Waiting for backend to initialize..."
+        timeout 300 bash -c "until docker exec execution-layer bash -c 'test -S /root/reth/socket/auth.ipc' 2>/dev/null; do sleep 10; done"
+        timeout 300 bash -c "until docker exec block-builder bash -c '(command -v nc >/dev/null && nc -z localhost 8561) || (command -v bash >/dev/null && bash -c \"echo > /dev/tcp/localhost/8561\" 2>/dev/null) || (command -v wget >/dev/null && wget -q -O /dev/null http://localhost:8561 2>/dev/null)' 2>/dev/null; do sleep 10; done"
+        
+        echo "▶ Waiting for execution-layer to be healthy..."
+        timeout 300 bash -c "until docker inspect --format='{{.State.Health.Status}}' execution-layer 2>/dev/null | grep -q 'healthy'; do sleep 10; done"
+        
+        echo "✅ Backend ready!"
+        echo "▶ Starting RPC providers..."
+        
+        # Start RPC providers based on NUM_WORKERS
+        if [ $$NUM_WORKERS -eq 1 ]; then
+          # Remove any container stuck in created/exited state
+          CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' rpc-provider-0 2>/dev/null || echo "")
+          if [ "$$CONTAINER_STATE" = "created" ] || [ "$$CONTAINER_STATE" = "exited" ]; then
+            echo "  Removing stuck container rpc-provider-0 (state: $$CONTAINER_STATE)..."
+            docker rm -f rpc-provider-0 >/dev/null 2>&1 || true
+          fi
+          
+          docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full --profile frontend up -d --remove-orphans rpc-provider-0
+          sleep 2
+          
+          CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' rpc-provider-0 2>/dev/null || echo "missing")
+          if [ "$$CONTAINER_STATE" != "running" ]; then
+            echo "  ⚠️  RPC provider-0 failed to start (state: $$CONTAINER_STATE), removing and retrying..."
+            docker rm -f rpc-provider-0 >/dev/null 2>&1 || true
+            docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full --profile frontend up -d --force-recreate rpc-provider-0
+            
+            # Verify again
+            sleep 2
+            CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' rpc-provider-0 2>/dev/null || echo "missing")
+            if [ "$$CONTAINER_STATE" != "running" ]; then
+              echo "  ❌ RPC provider-0 still not running after retry (state: $$CONTAINER_STATE)"
+            fi
+          fi
+          echo "✅ RPC provider-0 started"
+          
+          echo "▶ Waiting for RPC to initialize..."
+          timeout 300 bash -c "until docker inspect --format='{{.State.Health.Status}}' rpc-provider-0 2>/dev/null | grep -q 'healthy'; do sleep 10; done"
+          echo "✅ RPC provider-0 ready!"
+        else
+          # Determine profile for RPC providers
+          case $$NUM_WORKERS in
+            2) PROFILE="frontend-w2" ;;
+            3) PROFILE="frontend-w3" ;;
+            4) PROFILE="frontend-w4" ;;
+            5) PROFILE="frontend-w5" ;;
+            *) PROFILE="frontend" ;;
+          esac
+          
+          # Start all RPC providers for workers
+          for i in $$(seq 0 $$((NUM_WORKERS-1))); do
+            echo "  Starting rpc-provider-$$i..."
+            
+            # Remove any container stuck in created/exited state
+            CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "rpc-provider-$$i" 2>/dev/null || echo "")
+            if [ "$$CONTAINER_STATE" = "created" ] || [ "$$CONTAINER_STATE" = "exited" ]; then
+              echo "    Removing stuck container rpc-provider-$$i (state: $$CONTAINER_STATE)..."
+              docker rm -f "rpc-provider-$$i" >/dev/null 2>&1 || true
+            fi
+            
+            docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full --profile $$PROFILE up -d --remove-orphans rpc-provider-$$i
+            sleep 2
+            
+            CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "rpc-provider-$$i" 2>/dev/null || echo "missing")
+            if [ "$$CONTAINER_STATE" != "running" ]; then
+              echo "    ⚠️  RPC provider-$$i failed to start (state: $$CONTAINER_STATE), removing and retrying..."
+              docker rm -f "rpc-provider-$$i" >/dev/null 2>&1 || true
+              docker compose -f docker-compose.full.yml --project-directory "$$COMPOSE_HOST_PATH" --env-file "$$COMPOSE_ENV_FILE" --project-name igra-orchestra-$${NETWORK}-full --profile $$PROFILE up -d --force-recreate rpc-provider-$$i
+              
+              # Verify again
+              sleep 2
+              CONTAINER_STATE=$$(docker inspect --format='{{.State.Status}}' "rpc-provider-$$i" 2>/dev/null || echo "missing")
+              if [ "$$CONTAINER_STATE" != "running" ]; then
+                echo "    ❌ RPC provider-$$i still not running after retry (state: $$CONTAINER_STATE)"
+              fi
+            fi
+            echo "  ✅ RPC provider-$$i started"
+          done
+          
+          echo "▶ Waiting for RPC providers to initialize..."
+          for i in $$(seq 0 $$((NUM_WORKERS-1))); do
+            timeout 300 bash -c "until docker inspect --format='{{.State.Health.Status}}' rpc-provider-$$i 2>/dev/null | grep -q 'healthy'; do sleep 10; done" || true
+            echo "  ✅ RPC provider-$$i ready"
+          done
+          echo "✅ All RPC providers ready!"
+        fi
+        
+        WALLET_ADDR=$$(docker logs kaswallet-0 2>/dev/null | grep -oE "kaspatest:[a-zA-Z0-9]+" | head -1)
+        
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "   ✅ DEPLOYMENT COMPLETE!"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "🔑 Wallet Address (Worker 0):"
+        echo "   $$WALLET_ADDR"
+        echo ""
+        echo "🌐 RPC Endpoint:"
+        echo "   https://$${IGRA_ORCHESTRA_DOMAIN}:8545/{TOKEN}"
+        echo ""
+        echo "📊 Workers: $$NUM_WORKERS"
+        echo ""
+        echo "Run ./scripts/check-status.sh for details"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        echo "Orchestrator completed successfully. Exiting..."
+        exit 0
+        ENDBASH
     depends_on:
       - kaspad
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - .:/compose:ro
+    working_dir: /compose
     environment:
       - NETWORK=${NETWORK}
       - IGRA_ORCHESTRA_DOMAIN=${IGRA_ORCHESTRA_DOMAIN}
+      - NUM_WORKERS=${NUM_WORKERS:-1}
 
   # CORE SERVICES
   execution-layer:
@@ -267,9 +474,6 @@ services:
   block-builder:
     <<: *default-service
     restart: "no"
-    build:
-      context: build/repos/block-builder
-      dockerfile: ../../Dockerfile.block-builder
     image: igranetwork/block-builder:v0.2.2
     command: /app/jwt.hex http://execution-layer
     profiles: ["backend"]
@@ -297,12 +501,7 @@ services:
 
   viaduct:
     <<: *default-service
-    restart: "no"
-    build:
-      context: build/repos/viaduct
-      dockerfile: ../../Dockerfile.viaduct
-      ssh:
-        - default
+    restart: unless-stopped
     image: igranetwork/viaduct:v0.2.2
     profiles: ["backend"]
     container_name: viaduct
@@ -318,9 +517,23 @@ services:
       - FORCE_RESTORE_BACKUP=${FORCE_RESTORE_BACKUP:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    entrypoint: ["/app/viaduct-entrypoint.sh"]
     command: ["--ip-port=${KASPAD_HOST}:${KASPAD_BORSH_PORT}", "--bb-ip-port=block-builder:8561"]
     volumes:
       - viaduct_data:/app/storage
+      - ./build/viaduct-entrypoint.sh:/app/viaduct-entrypoint.sh:ro
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '2.0'
+        reservations:
+          memory: 4G
+          cpus: '1.0'
     healthcheck:
       <<: *default-healthcheck
       test: ["CMD", "bash", "-c", "echo hello > /dev/tcp/${KASPAD_HOST}/${KASPAD_BORSH_PORT}"]
@@ -331,7 +544,7 @@ services:
   # TRAEFIK SERVICE
   traefik:
     <<: *default-service
-    image: traefik:v3.0
+    image: traefik:v3.6
     container_name: traefik
     command:
       - "--api.dashboard=true"
@@ -416,6 +629,8 @@ services:
           echo hello > /dev/tcp/kaswallet-0/8082",
         ]
     depends_on:
+      execution-layer:
+        condition: service_healthy
       kaswallet-0:
         condition: service_healthy
 
@@ -425,7 +640,7 @@ services:
     ports:
       - "127.0.0.1:8082:8082"  # open 8082 on localhost for entry transactions
     volumes:
-      - kaswallet_0_keys:/app/keys.json
+      - ./keys/wallet-0:/keys
       - shared_config:/shared
     healthcheck:
       <<: *default-healthcheck
@@ -458,6 +673,8 @@ services:
           echo hello > /dev/tcp/kaswallet-1/8082",
         ]
     depends_on:
+      execution-layer:
+        condition: service_healthy
       kaswallet-1:
         condition: service_healthy
 
@@ -466,7 +683,7 @@ services:
     profiles: ["frontend-w2", "frontend-w3", "frontend-w4", "frontend-w5", "kaswallets"]
     container_name: kaswallet-1
     volumes:
-      - kaswallet_1_keys:/app/keys.json
+      - ./keys/wallet-1:/keys
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -498,6 +715,8 @@ services:
           echo hello > /dev/tcp/kaswallet-2/8082",
         ]
     depends_on:
+      execution-layer:
+        condition: service_healthy
       kaswallet-2:
         condition: service_healthy
 
@@ -506,7 +725,7 @@ services:
     profiles: ["frontend-w3", "frontend-w4", "frontend-w5", "kaswallets"]
     container_name: kaswallet-2
     volumes:
-      - kaswallet_2_keys:/app/keys.json
+      - ./keys/wallet-2:/keys
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -538,6 +757,8 @@ services:
           echo hello > /dev/tcp/kaswallet-3/8082",
         ]
     depends_on:
+      execution-layer:
+        condition: service_healthy
       kaswallet-3:
         condition: service_healthy
 
@@ -546,7 +767,7 @@ services:
     profiles: ["frontend-w4", "frontend-w5", "kaswallets"]
     container_name: kaswallet-3
     volumes:
-      - kaswallet_3_keys:/app/keys.json
+      - ./keys/wallet-3:/keys
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -578,6 +799,8 @@ services:
           echo hello > /dev/tcp/kaswallet-4/8082",
         ]
     depends_on:
+      execution-layer:
+        condition: service_healthy
       kaswallet-4:
         condition: service_healthy
 
@@ -586,7 +809,7 @@ services:
     profiles: ["frontend-w5", "kaswallets"]
     container_name: kaswallet-4
     volumes:
-      - kaswallet_4_keys:/app/keys.json
+      - ./keys/wallet-4:/keys
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -600,9 +823,6 @@ services:
   # KASPA SERVICES
   kaspad:
     <<: *default-service
-    build:
-      context: build/repos/rusty-kaspa
-      dockerfile: ../../Dockerfile.kaspad
     image: kaspad
     container_name: kaspad
     deploy:
@@ -634,10 +854,12 @@ services:
       else
         ARGS="$$ARGS --enable-unsynced-mining"
       fi
-      exec /app/kaspad $$ARGS
+      # Start kaspad and tee output to both stdout and log file for healthcheck
+      exec /app/kaspad $$ARGS 2>&1 | tee /app/data/kaspad.log
       '
     volumes:
       - kaspad_data:/app/data/
+      - ./build/kaspad-healthcheck.sh:/app/kaspad-healthcheck.sh:ro
     networks:
       - igra-network
       - traefik-network

@@ -10,21 +10,13 @@ volumes:
       type: tmpfs
       device: tmpfs
       o: size=10m
-  kaswallet_0_keys:
-  kaswallet_1_keys:
-  kaswallet_2_keys:
-  kaswallet_3_keys:
-  kaswallet_4_keys:
-  shared_config:
 networks:
   igra-network:
   traefik-network:
 
 x-default-logging: &default-logging
-  driver: "${LOGGING_DRIVER:-json-file}"
+  driver: "${LOGGING_DRIVER:-syslog}"
   options:
-    max-size: "100m"
-    max-file: "2"
     tag: "igra-orchestra-${NETWORK}/{{.Name}}/{{.ID}}"
 
 x-default-healthcheck: &default-healthcheck
@@ -38,14 +30,6 @@ x-default-service: &default-service
   networks:
     - igra-network
   logging: *default-logging
-  deploy:
-    resources:
-      limits:
-        memory: 4G
-        cpus: '2.0'
-      reservations:
-        memory: 2G
-        cpus: '1.0'
 
 x-rpc-provider-environment: &rpc-provider-environment
   RUST_LOG: ${RUST_LOG}
@@ -153,9 +137,6 @@ services:
     image: igranetwork/reth:1.7.0
     entrypoint: /root/reth/run-igra-dev-el.sh
     profiles: ["backend"]
-    depends_on:
-      kaspad:
-        condition: service_healthy
     ports:
       - "127.0.0.1:9545:8545"  # open 8545 on localhost for blockscout
       - "127.0.0.1:9546:8546"  # open 8546 on localhost for blockscout
@@ -210,9 +191,6 @@ services:
     command: /app/jwt.hex http://execution-layer
     profiles: ["backend"]
     container_name: block-builder
-    depends_on:
-      execution-layer:
-        condition: service_healthy
     expose:
       - "8561"
     environment:
@@ -245,9 +223,6 @@ services:
     image: igranetwork/viaduct:v0.2.2
     profiles: ["backend"]
     container_name: viaduct
-    depends_on:
-      block-builder:
-        condition: service_healthy
     environment:
       - RUST_LOG
       - REPLAY_ON_ERROR
@@ -255,9 +230,6 @@ services:
       - IGRA_LAUNCH_DAA_SCORE
       - MAGIC_SPK
       - DELAY_WINDOWS
-      - S3_BACKUP_BUCKET=${S3_BACKUP_BUCKET:-igralabs-viaduct-archival-data}
-      - S3_BACKUP_REGION=${S3_BACKUP_REGION:-eu-north-1}
-      - FORCE_RESTORE_BACKUP=${FORCE_RESTORE_BACKUP:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: ["--ip-port=${KASPAD_HOST}:${KASPAD_BORSH_PORT}", "--bb-ip-port=block-builder:8561"]
@@ -266,6 +238,9 @@ services:
     healthcheck:
       <<: *default-healthcheck
       test: ["CMD", "bash", "-c", "echo hello > /dev/tcp/${KASPAD_HOST}/${KASPAD_BORSH_PORT}"]
+    depends_on:
+      block-builder:
+        condition: service_healthy
 
   # TRAEFIK SERVICE
   traefik:
@@ -341,10 +316,8 @@ services:
     environment:
       <<: *rpc-provider-environment
       WALLET_DAEMON_URI: http://kaswallet-0:8082
-      WALLET_TO_ADDRESS: ${W0_WALLET_TO_ADDRESS:-auto}
-      KASWALLET_PASSWORD: ${W0_KASWALLET_PASSWORD:-}
-    volumes:
-      - shared_config:/shared
+      WALLET_TO_ADDRESS: ${W0_WALLET_TO_ADDRESS}
+      KASWALLET_PASSWORD: ${W0_KASWALLET_PASSWORD}
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -366,8 +339,7 @@ services:
     ports:
       - "127.0.0.1:8082:8082"  # open 8082 on localhost for entry transactions
     volumes:
-      - kaswallet_0_keys:/app/keys.json
-      - shared_config:/shared
+      - ./keys/keys.kaswallet-0.json:/app/keys.json
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -407,7 +379,7 @@ services:
     profiles: ["frontend-w2", "frontend-w3", "frontend-w4", "frontend-w5", "kaswallets"]
     container_name: kaswallet-1
     volumes:
-      - kaswallet_1_keys:/app/keys.json
+      - ./keys/keys.kaswallet-1.json:/app/keys.json
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -447,7 +419,7 @@ services:
     profiles: ["frontend-w3", "frontend-w4", "frontend-w5", "kaswallets"]
     container_name: kaswallet-2
     volumes:
-      - kaswallet_2_keys:/app/keys.json
+      - ./keys/keys.kaswallet-2.json:/app/keys.json
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -487,7 +459,7 @@ services:
     profiles: ["frontend-w4", "frontend-w5", "kaswallets"]
     container_name: kaswallet-3
     volumes:
-      - kaswallet_3_keys:/app/keys.json
+      - ./keys/keys.kaswallet-3.json:/app/keys.json
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -527,7 +499,7 @@ services:
     profiles: ["frontend-w5", "kaswallets"]
     container_name: kaswallet-4
     volumes:
-      - kaswallet_4_keys:/app/keys.json
+      - ./keys/keys.kaswallet-4.json:/app/keys.json
     healthcheck:
       <<: *default-healthcheck
       test: [
@@ -547,14 +519,6 @@ services:
     image: kaspad
     profiles: ["kaspad"]
     container_name: kaspad
-    deploy:
-      resources:
-        limits:
-          memory: 8G
-          cpus: '4.0'
-        reservations:
-          memory: 4G
-          cpus: '2.0'
     expose:
       - "16210" # GRPC Server
       - "16211" # P2P Server
@@ -594,9 +558,33 @@ services:
       - "traefik.tcp.routers.kaspad-json.service=kaspad-json-svc"
       - "traefik.tcp.services.kaspad-json-svc.loadbalancer.server.port=18210"
     healthcheck:
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 7200s
-      test: ["CMD", "/app/kaspad-healthcheck.sh"]
+      <<: *default-healthcheck
+      test: ["CMD", "bash", "-c", "echo hello > /dev/tcp/kaspad/16210"]
 
+  kaspa-miner:
+    <<: *default-service
+    build:
+      context: build/repos/kaspa-miner
+      dockerfile: ../../Dockerfile.kaspa-miner
+    image: kaspa-miner
+    profiles: ["kaspad"]
+    container_name: kaspa-miner
+    environment:
+      - RUST_LOG
+      - REPLAY_ON_ERROR
+      - SYNC_THREADS
+    entrypoint: >
+      sh -c '
+      KASPAD=$(getent ahostsv4 kaspad | grep kaspad | grep -Eo "\\b([0-9]{1,3}\\.){3}[0-9]{1,3}\\b") &&
+      exec /app/kaspa-miner
+      --mining-address ${MINING_ADDRESS}
+      --kaspad-address $$KASPAD
+      --port 16210
+      --threads ${MINING_THREADS}
+      --mine-when-not-synced
+      '
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      kaspad:
+        condition: service_healthy

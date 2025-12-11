@@ -66,7 +66,10 @@ get_wallet_address() {
         return 1
     fi
     
-    local wallet_address=$(docker logs kaswallet-0 2>/dev/null | grep -oE "kaspatest:[a-zA-Z0-9]+" | head -1)
+    local wallet_address=$(docker run --rm --network host \
+            --entrypoint /app/test_client \
+            igranetwork/kaswallet:v0.2.1 \
+            2>/dev/null | grep -oE "kaspatest:[a-zA-Z0-9]+" | head -1)
     if [[ -n "$wallet_address" ]]; then
         echo "$wallet_address"
         return 0

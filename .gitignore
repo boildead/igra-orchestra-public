@@ -16,3 +16,5 @@ tasks/
 .DS_Store
 .cursor
 letsencrypt/
+env.backend-with-rpc.example
+env.backend.example
